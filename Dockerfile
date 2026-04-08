@@ -12,7 +12,7 @@ ARG GLANCE_REF=main
 RUN git clone https://github.com/glanceapp/glance.git . \
     && git checkout "${GLANCE_REF}"
 
-# Generate embedded assets (icons, static files, etc.)
+# Generate embedded assets
 RUN go generate ./...
 
 # Build Glance in release mode (embeds assets)
@@ -25,9 +25,6 @@ WORKDIR /app
 
 # Copy the built binary
 COPY --from=build /src/glance /app/glance
-
-# Copy static assets (required for UI)
-COPY --from=build /src/static /app/static
 
 # Create config + icons directories
 RUN mkdir -p /app/config /app/icons
