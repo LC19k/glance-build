@@ -7,15 +7,15 @@ WORKDIR /src
 
 ARG GLANCE_REF=main
 
-# Clone Glance
+# Clone Glance and check out the desired ref
 RUN git clone https://github.com/glanceapp/glance.git . \
     && git checkout "${GLANCE_REF}"
 
 # Generate embedded assets
 RUN go generate ./...
 
-# Build the actual Glance binary (IMPORTANT: build the cmd/glance target)
-RUN CGO_ENABLED=0 go build -tags release -o glance ./cmd/glance
+# Build Glance in release mode (assets embedded)
+RUN CGO_ENABLED=0 go build -tags release -o glance .
 
 # Stage 2 — Runtime
 FROM alpine:3.21
