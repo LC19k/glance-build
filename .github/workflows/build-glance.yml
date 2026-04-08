@@ -7,10 +7,15 @@ on:
         description: "Glance ref (commit/tag) for stable build"
         required: true
         default: "main"
+
   schedule:
-    - cron: "0 4 * * *" # 04:00 UTC nightly
+    - cron: "0 4 * * *" # nightly at 04:00 UTC
 
 jobs:
+
+  ###############################################################
+  # 1. STABLE BUILD (manual, pinned, tagged `stable`)
+  ###############################################################
   stable:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -30,12 +35,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set build metadata
-        id: meta
-        run: |
-          echo "GLANCE_REF=${{ github.event.inputs.glance_ref }}" >> $GITHUB_ENV
-          echo "TAG_STABLE=stable" >> $GITHUB_ENV
-
       - name: Build and push (stable)
         uses: docker/build-push-action@v5
         with:
@@ -44,13 +43,17 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            GLANCE_REF=${{ env.GLANCE_REF }}
+            GLANCE_REF=${{ github.event.inputs.glance_ref }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_STABLE }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.event.inputs.glance_ref }}
           labels: |
             org.opencontainers.image.source=${{ github.repository }}
-            org.opencontainers.image.revision=${{ env.GLANCE_REF }}
+            org.opencontainers.image.revision=${{ github.event.inputs.glance_ref }}
 
+  ###############################################################
+  # 2. NIGHTLY BUILD (scheduled, only builds if upstream changed)
+  ###############################################################
   nightly:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -70,16 +73,50 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve upstream Glance HEAD
+      ###############################################################
+      # Step 1 — Get upstream HEAD SHA
+      ###############################################################
+      - name: Get upstream Glance HEAD SHA
         id: upstream
         run: |
           LATEST_SHA=$(git ls-remote https://github.com/glanceapp/glance.git HEAD | cut -f1)
           echo "LATEST_SHA=${LATEST_SHA}" >> $GITHUB_ENV
           echo "latest_sha=${LATEST_SHA}" >> $GITHUB_OUTPUT
 
-      # NOTE: true upstream-change gating would require persistent state.
-      # For now, we always build nightly from main.
+      ###############################################################
+      # Step 2 — Get last built SHA from GHCR label
+      ###############################################################
+      - name: Get last built SHA from GHCR
+        id: last
+        run: |
+          set +e
+          LAST_SHA=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            | jq -r '.annotations["org.opencontainers.image.revision"]')
+          echo "LAST_SHA=${LAST_SHA}" >> $GITHUB_ENV
+          echo "last_sha=${LAST_SHA}" >> $GITHUB_OUTPUT
+          set -e
 
+      ###############################################################
+      # Step 3 — Compare SHAs, skip if unchanged
+      ###############################################################
+      - name: Check if upstream changed
+        id: compare
+        run: |
+          if [ "${{ steps.upstream.outputs.latest_sha }}" = "${{ steps.last.outputs.last_sha }}" ]; then
+            echo "No upstream changes — skipping build."
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream changed — building new nightly."
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Stop if no changes
+        if: steps.compare.outputs.skip_build == 'true'
+        run: exit 0
+
+      ###############################################################
+      # Step 4 — Build and push new nightly
+      ###############################################################
       - name: Set nightly tags
         id: tags
         run: |
@@ -97,11 +134,11 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            GLANCE_REF=main
+            GLANCE_REF=${{ steps.upstream.outputs.latest_sha }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_LATEST }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_DATE }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_SHA }}
           labels: |
             org.opencontainers.image.source=${{ github.repository }}
-            org.opencontainers.image.revision=${{ env.LATEST_SHA }}
+            org.opencontainers.image.revision=${{ steps.upstream.outputs.latest_sha }}
