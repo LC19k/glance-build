@@ -1,44 +1,107 @@
-name: Build & Publish Glance (main)
+name: Build & Publish Glance
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      glance_ref:
+        description: "Glance ref (commit/tag) for stable build"
+        required: true
+        default: "main"
+  schedule:
+    - cron: "0 4 * * *" # 04:00 UTC nightly
 
 jobs:
-  build:
+  stable:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: lc19k/glance
 
     steps:
-      - name: Checkout repository
+      - name: Checkout glance-build repo
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Set build metadata
+        id: meta
+        run: |
+          echo "GLANCE_REF=${{ github.event.inputs.glance_ref }}" >> $GITHUB_ENV
+          echo "TAG_STABLE=stable" >> $GITHUB_ENV
+
+      - name: Build and push (stable)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
+          build-args: |
+            GLANCE_REF=${{ env.GLANCE_REF }}
           tags: |
-            ghcr.io/lc19k/glance:main
-            ghcr.io/lc19k/glance:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_STABLE }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.GLANCE_REF }}
+
+  nightly:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: lc19k/glance
+
+    steps:
+      - name: Checkout glance-build repo
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve upstream Glance HEAD
+        id: upstream
+        run: |
+          LATEST_SHA=$(git ls-remote https://github.com/glanceapp/glance.git HEAD | cut -f1)
+          echo "LATEST_SHA=${LATEST_SHA}" >> $GITHUB_ENV
+          echo "latest_sha=${LATEST_SHA}" >> $GITHUB_OUTPUT
+
+      # NOTE: true upstream-change gating would require persistent state.
+      # For now, we always build nightly from main.
+
+      - name: Set nightly tags
+        id: tags
+        run: |
+          DATE_TAG=$(date -u +'%Y%m%d')
+          echo "DATE_TAG=${DATE_TAG}" >> $GITHUB_ENV
+          echo "TAG_LATEST=latest" >> $GITHUB_ENV
+          echo "TAG_DATE=nightly-${DATE_TAG}" >> $GITHUB_ENV
+          echo "TAG_SHA=sha-${{ steps.upstream.outputs.latest_sha }}" >> $GITHUB_ENV
+
+      - name: Build and push (nightly)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            GLANCE_REF=main
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_LATEST }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_DATE }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_SHA }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.LATEST_SHA }}
