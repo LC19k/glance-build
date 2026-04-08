@@ -1,8 +1,7 @@
 # Stage 1 — Build Glance from source
 FROM golang:1.24.3-alpine3.21 AS build
 
-# Install build dependencies
-RUN apk add --no-cache git make nodejs npm
+RUN apk add --no-cache git
 
 WORKDIR /src
 
@@ -13,8 +12,11 @@ ARG GLANCE_REF=main
 RUN git clone https://github.com/glanceapp/glance.git . \
     && git checkout "${GLANCE_REF}"
 
-# Build Glance using upstream's official build pipeline
-RUN make build
+# Generate embedded assets (icons, static files, etc.)
+RUN go generate ./...
+
+# Build Glance in release mode (embeds assets)
+RUN CGO_ENABLED=0 go build -tags release -o glance .
 
 # Stage 2 — Runtime image
 FROM alpine:3.21
