@@ -1,4 +1,4 @@
-# Stage 1 — Build Glance from source
+# Stage 1 — Build Glance from source.
 FROM golang:1.22 AS build
 
 WORKDIR /src
