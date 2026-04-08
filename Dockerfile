@@ -7,7 +7,7 @@ WORKDIR /src
 RUN git clone https://github.com/glanceapp/glance.git .
 
 # Build the Glance binary
-RUN CGO_ENABLED=0 go build -o glance ./cmd/glance
+RUN CGO_ENABLED=0 go build -o glance ./cmd/server
 
 # Stage 2 — Runtime image
 FROM alpine:3.19
