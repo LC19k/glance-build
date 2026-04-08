@@ -6,7 +6,7 @@ RUN apk add --no-cache git
 
 WORKDIR /src
 
-# Pin to a specific upstream commit for stable, override via build-arg for nightlies
+# Pin to a specific upstream commit for stable builds
 ARG GLANCE_REF=main
 
 # Clone Glance from GitHub and check out the desired ref
