@@ -1,14 +1,19 @@
 # Stage 1 — Build Glance from source
 FROM golang:1.24.3-alpine3.21 AS build
 
+# Alpine images do NOT include git — install it
 RUN apk add --no-cache git
 
 WORKDIR /src
 
-# Clone Glance from GitHub
-RUN git clone https://github.com/glanceapp/glance.git .
+# Pin to a specific upstream commit for stable, override via build-arg for nightlies
+ARG GLANCE_REF=main
 
-# Build the Glance binary (root build, not cmd/)
+# Clone Glance from GitHub and check out the desired ref
+RUN git clone https://github.com/glanceapp/glance.git . \
+    && git checkout "${GLANCE_REF}"
+
+# Build the Glance binary from repo root
 RUN CGO_ENABLED=0 go build -o glance .
 
 # Stage 2 — Runtime image
