@@ -1,6 +1,8 @@
 # Stage 1 — Build Glance from source
 FROM golang:1.24.3-alpine3.21 AS build
 
+RUN apk add --no-cache git
+
 WORKDIR /src
 
 # Clone Glance from GitHub
