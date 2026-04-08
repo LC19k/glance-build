@@ -5,30 +5,27 @@ RUN apk add --no-cache git
 
 WORKDIR /src
 
-# Pin to a specific upstream commit for stable builds
 ARG GLANCE_REF=main
 
-# Clone Glance and check out the desired ref
+# Clone Glance
 RUN git clone https://github.com/glanceapp/glance.git . \
     && git checkout "${GLANCE_REF}"
 
 # Generate embedded assets
 RUN go generate ./...
 
-# Build Glance in release mode (embeds assets)
-RUN CGO_ENABLED=0 go build -tags release -o glance .
+# Build the actual Glance binary (IMPORTANT: build the cmd/glance target)
+RUN CGO_ENABLED=0 go build -tags release -o glance ./cmd/glance
 
-# Stage 2 — Runtime image
+# Stage 2 — Runtime
 FROM alpine:3.21
 
 WORKDIR /app
 
-# Copy the built binary
 COPY --from=build /src/glance /app/glance
 
-# Create config + icons directories
 RUN mkdir -p /app/config /app/icons
 
-EXPOSE 8080/tcp
+EXPOSE 8080
 
 ENTRYPOINT ["/app/glance", "--config", "/app/config/glance.yml"]
