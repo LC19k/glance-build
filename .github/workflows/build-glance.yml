@@ -39,27 +39,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build image (single build, no push)
-        id: build
+      # Build and push ONLY the stable tag in this step
+      - name: Build and push (stable)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: false
-          load: true
-          tags: glance:latest
+          push: true
           build-args: |
             GLANCE_REF=${{ github.event.inputs.glance_ref }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+          labels: |
+            org.opencontainers.image.source=${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.inputs.glance_ref }}
 
-      - name: Push tag: stable
+      # Re‑tag the already‑pushed image as sha-<ref> and push again
+      - name: Tag and push sha-<ref>
         run: |
-          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
-
-      - name: Push tag: sha-<ref>
-        run: |
-          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.event.inputs.glance_ref }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.event.inputs.glance_ref }}
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.event.inputs.glance_ref }}
 
   ###############################################################
@@ -112,31 +112,28 @@ jobs:
         if: steps.compare.outputs.skip_build == 'true'
         run: exit 0
 
-      - name: Build image (nightly, no push)
-        id: build
+      - name: Set nightly tags
+        id: tags
+        run: |
+          DATE_TAG=$(date -u +'%Y%m%d')
+          echo "DATE_TAG=${DATE_TAG}" >> $GITHUB_ENV
+          echo "TAG_LATEST=latest" >> $GITHUB_ENV
+          echo "TAG_DATE=nightly-${DATE_TAG}" >> $GITHUB_ENV
+          echo "TAG_SHA=sha-${{ steps.upstream.outputs.latest_sha }}" >> $GITHUB_ENV
+
+      - name: Build and push (nightly)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: false
-          load: true
-          tags: glance:latest
+          push: true
           build-args: |
             GLANCE_REF=${{ steps.upstream.outputs.latest_sha }}
-
-      - name: Push tag: latest
-        run: |
-          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-      - name: Push tag: nightly-<date>
-        run: |
-          DATE_TAG=$(date -u +'%Y%m%d')
-          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${DATE_TAG}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${DATE_TAG}
-
-      - name: Push tag: sha-<commit>
-        run: |
-          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.upstream.outputs.latest_sha }}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.upstream.outputs.latest_sha }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_LATEST }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_DATE }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_SHA }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.upstream.outputs.latest_sha }}
