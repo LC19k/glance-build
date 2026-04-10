@@ -39,21 +39,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push (stable)
+      - name: Build image (single build, no push)
         uses: docker/build-push-action@v5
+        id: build
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: true
+          push: false
+          load: true
           build-args: |
             GLANCE_REF=${{ github.event.inputs.glance_ref }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.event.inputs.glance_ref }}
-          labels: |
-            org.opencontainers.image.source=${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.event.inputs.glance_ref }}
+
+      - name: Push tag: stable
+        run: |
+          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+
+      - name: Push tag: sha-<ref>
+        run: |
+          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.event.inputs.glance_ref }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.event.inputs.glance_ref }}
 
   ###############################################################
   # 2. NIGHTLY BUILD (scheduled, only builds if upstream changed)
@@ -84,11 +90,10 @@ jobs:
         id: upstream
         run: |
           LATEST_SHA=$(git ls-remote https://github.com/glanceapp/glance.git HEAD | cut -f1)
-          echo "LATEST_SHA=${LATEST_SHA}" >> $GITHUB_ENV
           echo "latest_sha=${LATEST_SHA}" >> $GITHUB_OUTPUT
 
       ###############################################################
-      # Step 2 — Get last built SHA from GHCR label
+      # Step 2 — Get last built SHA from GHCR
       ###############################################################
       - name: Get last built SHA from GHCR
         id: last
@@ -96,7 +101,6 @@ jobs:
           set +e
           LAST_SHA=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             | jq -r '.annotations["org.opencontainers.image.revision"]')
-          echo "LAST_SHA=${LAST_SHA}" >> $GITHUB_ENV
           echo "last_sha=${LAST_SHA}" >> $GITHUB_OUTPUT
           set -e
 
@@ -107,10 +111,8 @@ jobs:
         id: compare
         run: |
           if [ "${{ steps.upstream.outputs.latest_sha }}" = "${{ steps.last.outputs.last_sha }}" ]; then
-            echo "No upstream changes — skipping build."
             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
-            echo "Upstream changed — building new nightly."
             echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
 
@@ -119,30 +121,35 @@ jobs:
         run: exit 0
 
       ###############################################################
-      # Step 4 — Build and push new nightly
+      # Step 4 — Build image (single build, no push)
       ###############################################################
-      - name: Set nightly tags
-        id: tags
-        run: |
-          DATE_TAG=$(date -u +'%Y%m%d')
-          echo "DATE_TAG=${DATE_TAG}" >> $GITHUB_ENV
-          echo "TAG_LATEST=latest" >> $GITHUB_ENV
-          echo "TAG_DATE=nightly-${DATE_TAG}" >> $GITHUB_ENV
-          echo "TAG_SHA=sha-${{ steps.upstream.outputs.latest_sha }}" >> $GITHUB_ENV
-
-      - name: Build and push (nightly)
+      - name: Build image (nightly)
         uses: docker/build-push-action@v5
+        id: build
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          push: true
+          push: false
+          load: true
           build-args: |
             GLANCE_REF=${{ steps.upstream.outputs.latest_sha }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_LATEST }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_DATE }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TAG_SHA }}
-          labels: |
-            org.opencontainers.image.source=${{ github.repository }}
-            org.opencontainers.image.revision=${{ steps.upstream.outputs.latest_sha }}
+
+      ###############################################################
+      # Step 5 — Push tags sequentially (GHCR-safe)
+      ###############################################################
+      - name: Push tag: latest
+        run: |
+          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Push tag: nightly-<date>
+        run: |
+          DATE_TAG=$(date -u +'%Y%m%d')
+          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${DATE_TAG}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${DATE_TAG}
+
+      - name: Push tag: sha-<commit>
+        run: |
+          docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.upstream.outputs.latest_sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.upstream.outputs.latest_sha }}
