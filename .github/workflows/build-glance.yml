@@ -40,14 +40,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build image (single build, no push)
-        uses: docker/build-push-action@v5
         id: build
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
           push: false
           load: true
+          tags: glance:latest
           build-args: |
             GLANCE_REF=${{ github.event.inputs.glance_ref }}
 
@@ -83,18 +84,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      ###############################################################
-      # Step 1 — Get upstream HEAD SHA
-      ###############################################################
       - name: Get upstream Glance HEAD SHA
         id: upstream
         run: |
           LATEST_SHA=$(git ls-remote https://github.com/glanceapp/glance.git HEAD | cut -f1)
           echo "latest_sha=${LATEST_SHA}" >> $GITHUB_OUTPUT
 
-      ###############################################################
-      # Step 2 — Get last built SHA from GHCR
-      ###############################################################
       - name: Get last built SHA from GHCR
         id: last
         run: |
@@ -104,9 +99,6 @@ jobs:
           echo "last_sha=${LAST_SHA}" >> $GITHUB_OUTPUT
           set -e
 
-      ###############################################################
-      # Step 3 — Compare SHAs, skip if unchanged
-      ###############################################################
       - name: Check if upstream changed
         id: compare
         run: |
@@ -120,24 +112,19 @@ jobs:
         if: steps.compare.outputs.skip_build == 'true'
         run: exit 0
 
-      ###############################################################
-      # Step 4 — Build image (single build, no push)
-      ###############################################################
-      - name: Build image (nightly)
-        uses: docker/build-push-action@v5
+      - name: Build image (nightly, no push)
         id: build
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
           push: false
           load: true
+          tags: glance:latest
           build-args: |
             GLANCE_REF=${{ steps.upstream.outputs.latest_sha }}
 
-      ###############################################################
-      # Step 5 — Push tags sequentially (GHCR-safe)
-      ###############################################################
       - name: Push tag: latest
         run: |
           docker tag glance:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
